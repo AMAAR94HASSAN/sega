@@ -26,6 +26,18 @@ h1{font-size:clamp(30px,7vw,52px);line-height:1;margin:15px 0 10px}.sub{margin:0
 #gameFrame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
 #backBtn{position:absolute;z-index:30;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));border:1px solid #ffffff2b;background:#05070bcc;color:#fff;border-radius:12px;padding:9px 12px;font-size:12px;font-weight:800;backdrop-filter:blur(8px);box-shadow:0 4px 16px #0008;touch-action:manipulation}
 #loading{position:absolute;inset:0;z-index:20;display:none;place-items:center;background:#05060a;color:#fff;text-align:center;padding:30px}
+#hud{position:absolute;inset:0;z-index:25;pointer-events:none;display:none}
+#hud.show{display:block}
+#leftControls,#rightControls{position:absolute;bottom:max(14px,env(safe-area-inset-bottom));pointer-events:auto;user-select:none;-webkit-user-select:none;touch-action:none}
+#leftControls{left:max(12px,env(safe-area-inset-left));width:150px;height:150px}
+#rightControls{right:max(12px,env(safe-area-inset-right));display:grid;grid-template-columns:repeat(2,64px);grid-template-rows:repeat(2,64px) auto;gap:10px;align-items:end;justify-items:center}
+#joyBase{position:absolute;inset:0;border-radius:50%;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.18);backdrop-filter:blur(8px);box-shadow:0 10px 24px rgba(0,0,0,.35)}
+#joyStick{position:absolute;left:45px;top:45px;width:60px;height:60px;border-radius:50%;background:rgba(56,189,248,.9);border:2px solid rgba(255,255,255,.35);box-shadow:0 8px 18px rgba(0,0,0,.35)}
+.controlBtn{width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,.22);background:rgba(255,255,255,.09);color:#fff;font-weight:900;font-size:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 20px rgba(0,0,0,.35);backdrop-filter:blur(8px);touch-action:none}
+.controlBtn.small{width:70px;height:40px;border-radius:999px;font-size:14px;padding:0 12px}
+.controlBtn.active{transform:scale(.95);background:#38bdf8;color:#062033}
+#btnY{grid-column:2;grid-row:1}#btnB{grid-column:1;grid-row:2}#btnA{grid-column:2;grid-row:2}#btnStart{grid-column:1 / span 2;grid-row:3}
+@media (max-width:680px){#leftControls{width:130px;height:130px}#joyStick{width:52px;height:52px;left:39px;top:39px}#rightControls{grid-template-columns:repeat(2,58px);grid-template-rows:repeat(2,58px) auto;gap:8px}.controlBtn{width:58px;height:58px;font-size:18px}.controlBtn.small{width:66px;height:38px;font-size:13px}}
 .loader{width:40px;height:40px;border:4px solid #ffffff20;border-top-color:#38bdf8;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}@keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:640px){.grid{grid-template-columns:1fr 1fr;gap:10px}.game-card{padding:14px;min-height:190px;border-radius:18px}.game-card h2{font-size:18px}.icon{font-size:29px;margin-bottom:10px}}
 @media(max-width:390px){.grid{grid-template-columns:1fr}.game-card{min-height:auto}}
@@ -48,6 +60,18 @@ h1{font-size:clamp(30px,7vw,52px);line-height:1;margin:15px 0 10px}.sub{margin:0
 <section id="player">
  <iframe id="gameFrame" allow="autoplay; fullscreen; gamepad" allowfullscreen></iframe>
  <button id="backBtn" type="button">☰ Menu</button>
+ <div id="hud">
+   <div id="leftControls">
+     <div id="joyBase"></div>
+     <div id="joyStick"></div>
+   </div>
+   <div id="rightControls">
+     <div class="controlBtn" id="btnY" data-key="KeyC">C</div>
+     <div class="controlBtn" id="btnB" data-key="KeyZ">B</div>
+     <div class="controlBtn" id="btnA" data-key="KeyX">A</div>
+     <div class="controlBtn small" id="btnStart" data-key="Enter">START</div>
+   </div>
+ </div>
  <div id="loading"><div><div class="loader"></div><div>Loading game…</div></div></div>
 </section>
 <script>
@@ -56,6 +80,76 @@ const menu=document.getElementById('menu');
 const player=document.getElementById('player');
 const frame=document.getElementById('gameFrame');
 const loading=document.getElementById('loading');
+const hud=document.getElementById('hud');
+const joyBase=document.getElementById('joyBase');
+const joyStick=document.getElementById('joyStick');
+const buttonEls=[...document.querySelectorAll('.controlBtn')];
+const activeKeys=new Set();
+let joyPointer=null;
+let dirState={up:false,down:false,left:false,right:false};
+
+
+function getFrameTargets(){
+  try{
+    const w=frame.contentWindow; const d=w&&w.document;
+    if(!w||!d) return null;
+    return {w,d};
+  }catch(e){ return null; }
+}
+function fireKey(type, code){
+  const t=getFrameTargets();
+  if(!t) return;
+  const keyMap={ArrowUp:'ArrowUp',ArrowDown:'ArrowDown',ArrowLeft:'ArrowLeft',ArrowRight:'ArrowRight',Enter:'Enter',KeyZ:'z',KeyX:'x',KeyC:'c'};
+  const evInit={key:keyMap[code]||code,code:code,bubbles:true,cancelable:true,composed:true};
+  try{ t.d.dispatchEvent(new t.w.KeyboardEvent(type, evInit)); }catch(e){}
+  try{ t.w.dispatchEvent(new t.w.KeyboardEvent(type, evInit)); }catch(e){}
+}
+function pressKey(code){ if(activeKeys.has(code)) return; activeKeys.add(code); fireKey('keydown',code); }
+function releaseKey(code){ if(!activeKeys.has(code)) return; activeKeys.delete(code); fireKey('keyup',code); }
+function releaseAllKeys(){ [...activeKeys].forEach(releaseKey); }
+function setDir(next){
+  for(const k of ['up','down','left','right']){
+    const code='Arrow'+k.charAt(0).toUpperCase()+k.slice(1);
+    if(next[k] && !dirState[k]) pressKey(code);
+    if(!next[k] && dirState[k]) releaseKey(code);
+  }
+  dirState=next;
+}
+function centerStick(){ joyStick.style.left=((joyBase.clientWidth-joyStick.clientWidth)/2)+'px'; joyStick.style.top=((joyBase.clientHeight-joyStick.clientHeight)/2)+'px'; }
+function updateJoystick(clientX, clientY){
+  const r=joyBase.getBoundingClientRect();
+  const cx=r.left + r.width/2, cy=r.top + r.height/2;
+  let dx=clientX-cx, dy=clientY-cy;
+  const max=(r.width/2)-(joyStick.clientWidth/2)-4;
+  const dist=Math.hypot(dx,dy);
+  if(dist>max){ dx=dx/dist*max; dy=dy/dist*max; }
+  joyStick.style.left=(r.width/2 - joyStick.clientWidth/2 + dx)+'px';
+  joyStick.style.top=(r.height/2 - joyStick.clientHeight/2 + dy)+'px';
+  const threshold=max*0.35;
+  setDir({
+    up: dy < -threshold,
+    down: dy > threshold,
+    left: dx < -threshold,
+    right: dx > threshold
+  });
+}
+function bindButton(el){
+  const code=el.dataset.key;
+  const start=e=>{ e.preventDefault(); el.classList.add('active'); pressKey(code); };
+  const end=e=>{ if(e) e.preventDefault(); el.classList.remove('active'); releaseKey(code); };
+  el.addEventListener('pointerdown',start,{passive:false});
+  el.addEventListener('pointerup',end,{passive:false});
+  el.addEventListener('pointercancel',end,{passive:false});
+  el.addEventListener('pointerleave',end,{passive:false});
+}
+buttonEls.forEach(bindButton);
+joyBase.addEventListener('pointerdown',e=>{ e.preventDefault(); joyPointer=e.pointerId; joyBase.setPointerCapture(e.pointerId); updateJoystick(e.clientX,e.clientY); },{passive:false});
+joyBase.addEventListener('pointermove',e=>{ if(e.pointerId!==joyPointer) return; e.preventDefault(); updateJoystick(e.clientX,e.clientY); },{passive:false});
+function endJoy(e){ if(joyPointer===null || e.pointerId!==joyPointer) return; e.preventDefault(); joyPointer=null; try{joyBase.releasePointerCapture(e.pointerId);}catch(_){} setDir({up:false,down:false,left:false,right:false}); centerStick(); }
+joyBase.addEventListener('pointerup',endJoy,{passive:false});
+joyBase.addEventListener('pointercancel',endJoy,{passive:false});
+window.addEventListener('resize',centerStick);
+centerStick();
 
 function decodeB64(b64){
   const bin=atob(b64), len=bin.length;
@@ -65,13 +159,13 @@ function decodeB64(b64){
 }
 function openGame(id){
   if(!GAMES[id]) return;
-  menu.style.display='none'; player.style.display='block'; loading.style.display='grid';
+  menu.style.display='none'; player.style.display='block'; hud.classList.add('show'); loading.style.display='grid'; releaseAllKeys(); setDir({up:false,down:false,left:false,right:false}); centerStick();
   frame.onload=()=>{ loading.style.display='none'; try{frame.contentWindow.focus()}catch(e){} };
   frame.srcdoc=decodeB64(GAMES[id]);
 }
 function closeGame(){
   frame.onload=null; frame.srcdoc=''; frame.removeAttribute('src');
-  player.style.display='none'; loading.style.display='none'; menu.style.display='block';
+  releaseAllKeys(); setDir({up:false,down:false,left:false,right:false}); centerStick(); hud.classList.remove('show'); player.style.display='none'; loading.style.display='none'; menu.style.display='block';
 }
 document.querySelectorAll('[data-game]').forEach(el=>el.addEventListener('click',()=>openGame(el.dataset.game)));
 document.getElementById('backBtn').addEventListener('click',closeGame);
