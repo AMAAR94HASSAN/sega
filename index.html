@@ -32,7 +32,7 @@ h1{font-size:clamp(30px,7vw,52px);line-height:1;margin:15px 0 10px}.sub{margin:0
 #leftControls{left:max(12px,env(safe-area-inset-left));width:150px;height:150px}
 #rightControls{right:max(12px,env(safe-area-inset-right));display:grid;grid-template-columns:repeat(2,64px);grid-template-rows:repeat(2,64px) auto;gap:10px;align-items:end;justify-items:center}
 #joyBase{position:absolute;inset:0;border-radius:50%;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.18);backdrop-filter:blur(8px);box-shadow:0 10px 24px rgba(0,0,0,.35)}
-#joyStick{position:absolute;left:45px;top:45px;width:60px;height:60px;border-radius:50%;background:rgba(56,189,248,.9);border:2px solid rgba(255,255,255,.35);box-shadow:0 8px 18px rgba(0,0,0,.35)}
+#joyStick{position:absolute;left:45px;top:45px;width:60px;height:60px;border-radius:50%;background:rgba(56,189,248,.9);border:2px solid rgba(255,255,255,.35);box-shadow:0 8px 18px rgba(0,0,0,.35);pointer-events:none}
 .controlBtn{width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,.22);background:rgba(255,255,255,.09);color:#fff;font-weight:900;font-size:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 20px rgba(0,0,0,.35);backdrop-filter:blur(8px);touch-action:none}
 .controlBtn.small{width:70px;height:40px;border-radius:999px;font-size:14px;padding:0 12px}
 .controlBtn.active{transform:scale(.95);background:#38bdf8;color:#062033}
@@ -66,10 +66,10 @@ h1{font-size:clamp(30px,7vw,52px);line-height:1;margin:15px 0 10px}.sub{margin:0
      <div id="joyStick"></div>
    </div>
    <div id="rightControls">
-     <div class="controlBtn" id="btnY" data-key="KeyC">C</div>
-     <div class="controlBtn" id="btnB" data-key="KeyZ">B</div>
-     <div class="controlBtn" id="btnA" data-key="KeyX">A</div>
-     <div class="controlBtn small" id="btnStart" data-key="Enter">START</div>
+     <div class="controlBtn" id="btnY" data-index="8">C</div>
+     <div class="controlBtn" id="btnB" data-index="0">B</div>
+     <div class="controlBtn" id="btnA" data-index="1">A</div>
+     <div class="controlBtn small" id="btnStart" data-index="3">START</div>
    </div>
  </div>
  <div id="loading"><div><div class="loader"></div><div>Loading game…</div></div></div>
@@ -84,7 +84,7 @@ const hud=document.getElementById('hud');
 const joyBase=document.getElementById('joyBase');
 const joyStick=document.getElementById('joyStick');
 const buttonEls=[...document.querySelectorAll('.controlBtn')];
-const activeKeys=new Set();
+const activeInputs=new Set();
 let joyPointer=null;
 let dirState={up:false,down:false,left:false,right:false};
 
@@ -104,14 +104,39 @@ function fireKey(type, code){
   try{ t.d.dispatchEvent(new t.w.KeyboardEvent(type, evInit)); }catch(e){}
   try{ t.w.dispatchEvent(new t.w.KeyboardEvent(type, evInit)); }catch(e){}
 }
-function pressKey(code){ if(activeKeys.has(code)) return; activeKeys.add(code); fireKey('keydown',code); }
-function releaseKey(code){ if(!activeKeys.has(code)) return; activeKeys.delete(code); fireKey('keyup',code); }
-function releaseAllKeys(){ [...activeKeys].forEach(releaseKey); }
+function directInput(index, down){
+  const t=getFrameTargets();
+  if(!t) return false;
+  try{
+    const gm=t.w.EJS_emulator && t.w.EJS_emulator.gameManager;
+    if(gm && typeof gm.simulateInput==='function'){
+      gm.simulateInput(0,index,down?1:0);
+      return true;
+    }
+    if(typeof t.w.simulate_input==='function'){
+      t.w.simulate_input(0,index,down?1:0);
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+const fallbackCode={0:'KeyX',1:'KeyZ',3:'Enter',4:'ArrowUp',5:'ArrowDown',6:'ArrowLeft',7:'ArrowRight',8:'KeyC'};
+function pressInput(index){
+  if(activeInputs.has(index)) return;
+  activeInputs.add(index);
+  if(!directInput(index,true)) fireKey('keydown',fallbackCode[index]);
+}
+function releaseInput(index){
+  if(!activeInputs.has(index)) return;
+  activeInputs.delete(index);
+  if(!directInput(index,false)) fireKey('keyup',fallbackCode[index]);
+}
+function releaseAllInputs(){ [...activeInputs].forEach(releaseInput); }
 function setDir(next){
+  const idx={up:4,down:5,left:6,right:7};
   for(const k of ['up','down','left','right']){
-    const code='Arrow'+k.charAt(0).toUpperCase()+k.slice(1);
-    if(next[k] && !dirState[k]) pressKey(code);
-    if(!next[k] && dirState[k]) releaseKey(code);
+    if(next[k] && !dirState[k]) pressInput(idx[k]);
+    if(!next[k] && dirState[k]) releaseInput(idx[k]);
   }
   dirState=next;
 }
@@ -134,20 +159,23 @@ function updateJoystick(clientX, clientY){
   });
 }
 function bindButton(el){
-  const code=el.dataset.key;
-  const start=e=>{ e.preventDefault(); el.classList.add('active'); pressKey(code); };
-  const end=e=>{ if(e) e.preventDefault(); el.classList.remove('active'); releaseKey(code); };
+  const index=Number(el.dataset.index);
+  const start=e=>{ e.preventDefault(); try{el.setPointerCapture(e.pointerId)}catch(_){} el.classList.add('active'); pressInput(index); };
+  const end=e=>{ if(e) e.preventDefault(); el.classList.remove('active'); releaseInput(index); };
   el.addEventListener('pointerdown',start,{passive:false});
   el.addEventListener('pointerup',end,{passive:false});
   el.addEventListener('pointercancel',end,{passive:false});
-  el.addEventListener('pointerleave',end,{passive:false});
+  el.addEventListener('lostpointercapture',end,{passive:false});
 }
 buttonEls.forEach(bindButton);
-joyBase.addEventListener('pointerdown',e=>{ e.preventDefault(); joyPointer=e.pointerId; joyBase.setPointerCapture(e.pointerId); updateJoystick(e.clientX,e.clientY); },{passive:false});
-joyBase.addEventListener('pointermove',e=>{ if(e.pointerId!==joyPointer) return; e.preventDefault(); updateJoystick(e.clientX,e.clientY); },{passive:false});
-function endJoy(e){ if(joyPointer===null || e.pointerId!==joyPointer) return; e.preventDefault(); joyPointer=null; try{joyBase.releasePointerCapture(e.pointerId);}catch(_){} setDir({up:false,down:false,left:false,right:false}); centerStick(); }
-joyBase.addEventListener('pointerup',endJoy,{passive:false});
-joyBase.addEventListener('pointercancel',endJoy,{passive:false});
+const joyArea=document.getElementById('leftControls');
+joyArea.addEventListener('pointerdown',e=>{ e.preventDefault(); joyPointer=e.pointerId; try{joyArea.setPointerCapture(e.pointerId)}catch(_){} updateJoystick(e.clientX,e.clientY); },{passive:false});
+joyArea.addEventListener('pointermove',e=>{ if(e.pointerId!==joyPointer) return; e.preventDefault(); updateJoystick(e.clientX,e.clientY); },{passive:false});
+function endJoy(e){ if(joyPointer===null || e.pointerId!==joyPointer) return; e.preventDefault(); joyPointer=null; try{joyArea.releasePointerCapture(e.pointerId);}catch(_){} setDir({up:false,down:false,left:false,right:false}); centerStick(); }
+joyArea.addEventListener('pointerup',endJoy,{passive:false});
+joyArea.addEventListener('pointercancel',endJoy,{passive:false});
+window.addEventListener('blur',()=>{releaseAllInputs();setDir({up:false,down:false,left:false,right:false});centerStick();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){releaseAllInputs();setDir({up:false,down:false,left:false,right:false});centerStick();}});
 window.addEventListener('resize',centerStick);
 centerStick();
 
@@ -159,13 +187,13 @@ function decodeB64(b64){
 }
 function openGame(id){
   if(!GAMES[id]) return;
-  menu.style.display='none'; player.style.display='block'; hud.classList.add('show'); loading.style.display='grid'; releaseAllKeys(); setDir({up:false,down:false,left:false,right:false}); centerStick();
+  menu.style.display='none'; player.style.display='block'; hud.classList.add('show'); loading.style.display='grid'; releaseAllInputs(); setDir({up:false,down:false,left:false,right:false}); centerStick();
   frame.onload=()=>{ loading.style.display='none'; try{frame.contentWindow.focus()}catch(e){} };
   frame.srcdoc=decodeB64(GAMES[id]);
 }
 function closeGame(){
   frame.onload=null; frame.srcdoc=''; frame.removeAttribute('src');
-  releaseAllKeys(); setDir({up:false,down:false,left:false,right:false}); centerStick(); hud.classList.remove('show'); player.style.display='none'; loading.style.display='none'; menu.style.display='block';
+  releaseAllInputs(); setDir({up:false,down:false,left:false,right:false}); centerStick(); hud.classList.remove('show'); player.style.display='none'; loading.style.display='none'; menu.style.display='block';
 }
 document.querySelectorAll('[data-game]').forEach(el=>el.addEventListener('click',()=>openGame(el.dataset.game)));
 document.getElementById('backBtn').addEventListener('click',closeGame);
